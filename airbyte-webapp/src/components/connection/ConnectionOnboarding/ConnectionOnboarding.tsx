@@ -31,7 +31,7 @@ const DEFAULT_SOURCES = [
   ConnectorIds.Sources.Postgres,
   ConnectorIds.Sources.GoogleSheets,
   ConnectorIds.Sources.File,
-  ConnectorIds.Sources.Sftp
+  ConnectorIds.Sources.Sftp,
 ];
 
 const DEFAULT_DESTINATIONS = [

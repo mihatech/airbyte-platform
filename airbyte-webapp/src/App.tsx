@@ -2,8 +2,6 @@ import React, { Suspense } from "react";
 import { HelmetProvider } from "react-helmet-async";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
-import { DevToolsToggle } from "components/DevToolsToggle";
-
 import { QueryProvider, useGetInstanceConfiguration } from "core/api";
 import {
   InstanceConfigurationResponseEdition,
@@ -15,7 +13,6 @@ import { OSSAuthService } from "core/services/auth";
 import { defaultOssFeatures, defaultEnterpriseFeatures, FeatureService } from "core/services/features";
 import { I18nProvider } from "core/services/i18n";
 import { BlockerService } from "core/services/navigation";
-import { isDevelopment } from "core/utils/isDevelopment";
 import { ConfirmationModalService } from "hooks/services/ConfirmationModal";
 import { FormChangeTrackerService } from "hooks/services/FormChangeTracker";
 import { ModalServiceProvider } from "hooks/services/Modal";
@@ -71,7 +68,6 @@ const App: React.FC = () => {
           </QueryProvider>
         </I18nProvider>
       </AirbyteThemeProvider>
-
     </React.StrictMode>
   );
 };
