@@ -1,6 +1,6 @@
 {
-  "short_name": "Airbyte",
-  "name": "Airbyte",
+  "short_name": "hiview",
+  "name": "hiview",
   "icons": [
     {
       "src": "icon_blue_16.png",
@@ -33,7 +33,7 @@
       "sizes": "224x224"
     },
     {
-      "src": "logo.png",
+      "src": "logo.svg",
       "type": "image/png",
       "sizes": "336x336"
     }
