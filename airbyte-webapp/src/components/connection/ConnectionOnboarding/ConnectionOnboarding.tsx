@@ -27,15 +27,17 @@ interface ConnectionOnboardingProps {
 }
 
 const DEFAULT_SOURCES = [
-  ConnectorIds.Sources.FacebookMarketing,
+  ConnectorIds.Sources.MySql,
   ConnectorIds.Sources.Postgres,
   ConnectorIds.Sources.GoogleSheets,
+  ConnectorIds.Sources.File,
+  ConnectorIds.Sources.Sftp
 ];
 
 const DEFAULT_DESTINATIONS = [
   ConnectorIds.Destinations.BigQuery,
   ConnectorIds.Destinations.Snowflake,
-  ConnectorIds.Destinations.Postgres,
+  ConnectorIds.Destinations.DatabricksLakehouse,
 ];
 
 interface ConnectorSpecificationMap {

@@ -36,7 +36,7 @@ export const AirbyteThemeProvider: React.FC<React.PropsWithChildren<AirbyteTheme
 }) => {
   const [storedTheme, setStoredTheme] = useLocalStorage(
     "airbyteTheme",
-    getPreferredColorScheme() === "dark" ? "airbyteThemeDark" : "airbyteThemeLight"
+    getPreferredColorScheme() === "dark" ? "airbyteThemeLight" : "airbyteThemeDark"
   );
 
   const theme = themeOverride ? themeOverride : storedTheme;

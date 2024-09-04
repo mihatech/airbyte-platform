@@ -71,7 +71,7 @@ const App: React.FC = () => {
           </QueryProvider>
         </I18nProvider>
       </AirbyteThemeProvider>
-      {isDevelopment() && <DevToolsToggle />}
+
     </React.StrictMode>
   );
 };
