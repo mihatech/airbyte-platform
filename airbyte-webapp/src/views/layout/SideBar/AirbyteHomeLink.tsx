@@ -4,7 +4,7 @@ import { FormattedMessage, useIntl } from "react-intl";
 import { Badge } from "components/ui/Badge";
 import { FlexContainer } from "components/ui/Flex";
 import { Link } from "components/ui/Link";
-import AirbyteLogo from "images/airbyteLogo.svg?react";
+import AirbyteLogo from "images/hiViewHeaderLogo.svg?react";
 
 import { FeatureItem, IfFeatureEnabled } from "core/services/features";
 import { RoutePaths } from "pages/routePaths";
@@ -21,7 +21,7 @@ export const AirbyteHomeLink: React.FC = () => {
         aria-label={formatMessage({ id: "sidebar.homepage" })}
         className={styles.homeLink__link}
       >
-        <AirbyteLogo height={45} className={styles.homeLink__logo} />
+        <AirbyteLogo height={45} width={90} className={styles.homeLink__logo} />
       </Link>
       <IfFeatureEnabled feature={FeatureItem.EnterpriseBranding}>
         <BrandingBadge product="enterprise" />
