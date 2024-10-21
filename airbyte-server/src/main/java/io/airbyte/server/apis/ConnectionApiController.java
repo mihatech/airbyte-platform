@@ -21,6 +21,7 @@ import io.airbyte.api.model.generated.ConnectionDataHistoryRequestBody;
 import io.airbyte.api.model.generated.ConnectionEventIdRequestBody;
 import io.airbyte.api.model.generated.ConnectionEventList;
 import io.airbyte.api.model.generated.ConnectionEventWithDetails;
+import io.airbyte.api.model.generated.ConnectionEventsBackfillRequestBody;
 import io.airbyte.api.model.generated.ConnectionEventsRequestBody;
 import io.airbyte.api.model.generated.ConnectionIdRequestBody;
 import io.airbyte.api.model.generated.ConnectionLastJobPerStreamReadItem;
@@ -36,6 +37,7 @@ import io.airbyte.api.model.generated.ConnectionStreamRefreshRequestBody;
 import io.airbyte.api.model.generated.ConnectionStreamRequestBody;
 import io.airbyte.api.model.generated.ConnectionSyncProgressRead;
 import io.airbyte.api.model.generated.ConnectionUpdate;
+import io.airbyte.api.model.generated.ConnectionUpdateWithReason;
 import io.airbyte.api.model.generated.ConnectionUptimeHistoryRequestBody;
 import io.airbyte.api.model.generated.GetTaskQueueNameRequest;
 import io.airbyte.api.model.generated.InternalOperationResult;
@@ -46,6 +48,8 @@ import io.airbyte.api.model.generated.PostprocessDiscoveredCatalogRequestBody;
 import io.airbyte.api.model.generated.PostprocessDiscoveredCatalogResult;
 import io.airbyte.api.model.generated.TaskQueueNameRead;
 import io.airbyte.api.model.generated.WorkspaceIdRequestBody;
+import io.airbyte.commons.auth.generated.Intent;
+import io.airbyte.commons.auth.permissions.RequiresIntent;
 import io.airbyte.commons.server.errors.BadRequestException;
 import io.airbyte.commons.server.handlers.ConnectionsHandler;
 import io.airbyte.commons.server.handlers.JobHistoryHandler;
@@ -114,6 +118,17 @@ public class ConnectionApiController implements ConnectionApi {
   }
 
   @Override
+  @Post(uri = "/backfill_events")
+  @Secured({ADMIN})
+  @ExecuteOn(AirbyteTaskExecutors.IO)
+  public void backfillConnectionEvents(ConnectionEventsBackfillRequestBody connectionEventsBackfillRequestBody) {
+    ApiHelper.execute(() -> {
+      connectionsHandler.backfillConnectionEvents(connectionEventsBackfillRequestBody);
+      return null;
+    });
+  }
+
+  @Override
   @Post(uri = "/create")
   @Secured({WORKSPACE_EDITOR, ORGANIZATION_EDITOR})
   @ExecuteOn(AirbyteTaskExecutors.SCHEDULER)
@@ -127,6 +142,15 @@ public class ConnectionApiController implements ConnectionApi {
   @ExecuteOn(AirbyteTaskExecutors.IO)
   public ConnectionRead updateConnection(@Body final ConnectionUpdate connectionUpdate) {
     return ApiHelper.execute(() -> connectionsHandler.updateConnection(connectionUpdate, null, false));
+  }
+
+  @Override
+  @Post(uri = "/update_with_reason")
+  @Secured({WORKSPACE_EDITOR, ORGANIZATION_EDITOR})
+  @ExecuteOn(AirbyteTaskExecutors.IO)
+  public ConnectionRead updateConnectionWithReason(@Body final ConnectionUpdateWithReason connectionUpdateWithReason) {
+    return ApiHelper.execute(() -> connectionsHandler.updateConnection(connectionUpdateWithReason.getConnectionUpdate(),
+        connectionUpdateWithReason.getUpdateReason(), connectionUpdateWithReason.getAutoUpdate()));
   }
 
   @Override
@@ -148,8 +172,8 @@ public class ConnectionApiController implements ConnectionApi {
   }
 
   @Post(uri = "/refresh")
-  @Secured({WORKSPACE_EDITOR, ORGANIZATION_EDITOR})
   @ExecuteOn(AirbyteTaskExecutors.SCHEDULER)
+  @RequiresIntent(Intent.RunAndCancelConnectionSyncAndRefresh)
   @Override
   public BooleanRead refreshConnectionStream(@Body final ConnectionStreamRefreshRequestBody connectionStreamRefreshRequestBody) {
     return ApiHelper.execute(() -> new BooleanRead().value(streamRefreshesHandler.createRefreshesForConnection(
@@ -279,8 +303,8 @@ public class ConnectionApiController implements ConnectionApi {
 
   @Override
   @Post(uri = "/sync")
-  @Secured({WORKSPACE_EDITOR, ORGANIZATION_EDITOR})
   @ExecuteOn(AirbyteTaskExecutors.SCHEDULER)
+  @RequiresIntent(Intent.RunAndCancelConnectionSyncAndRefresh)
   public JobInfoRead syncConnection(@Body final ConnectionIdRequestBody connectionIdRequestBody) {
     return ApiHelper.execute(() -> schedulerHandler.syncConnection(connectionIdRequestBody));
   }

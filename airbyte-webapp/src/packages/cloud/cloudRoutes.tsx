@@ -3,6 +3,7 @@ import { createSearchParams, Navigate, Route, Routes, useLocation } from "react-
 import { useEffectOnce } from "react-use";
 
 import LoadingPage from "components/LoadingPage";
+import { EnterpriseSourcePage } from "components/source/enterpriseStubs/EnterpriseSourcePage";
 
 import { useCurrentWorkspaceId } from "area/workspace/utils";
 import { useCurrentWorkspace, useInvalidateAllWorkspaceScopeOnChange } from "core/api";
@@ -12,21 +13,23 @@ import { useAnalyticsIdentifyUser, useAnalyticsRegisterValues } from "core/servi
 import { useAuthService } from "core/services/auth";
 import { FeatureItem, useFeature } from "core/services/features";
 import { isCorporateEmail } from "core/utils/freeEmailProviders";
-import { useIntent } from "core/utils/rbac";
+import { Intent, useGeneratedIntent, useIntent } from "core/utils/rbac";
 import { storeUtmFromQuery } from "core/utils/utmStorage";
-import { useExperiment, useExperimentContext } from "hooks/services/Experiment";
+import { useExperimentContext } from "hooks/services/Experiment";
 import { useBuildUpdateCheck } from "hooks/services/useBuildUpdateCheck";
 import { useQuery } from "hooks/useQuery";
 import ConnectorBuilderRoutes from "pages/connectorBuilder/ConnectorBuilderRoutes";
 import { RoutePaths, DestinationPaths, SourcePaths } from "pages/routePaths";
-import { GeneralOrganizationSettingsPage } from "pages/SettingsPage/GeneralOrganizationSettingsPage";
 import {
   SourcesPage as SettingsSourcesPage,
   DestinationsPage as SettingsDestinationsPage,
 } from "pages/SettingsPage/pages/ConnectorsPage";
 import { NotificationPage } from "pages/SettingsPage/pages/NotificationPage";
+import { GeneralOrganizationSettingsPage } from "pages/SettingsPage/pages/Organization/GeneralOrganizationSettingsPage";
+import { OrganizationMembersPage } from "pages/SettingsPage/pages/Organization/OrganizationMembersPage";
 
 import { AcceptInvitation } from "./AcceptInvitation";
+import { useShowBillingPageV2 } from "./area/billing/utils/useShowBillingPage";
 import { CloudRoutes } from "./cloudRoutePaths";
 import { LDExperimentServiceProvider } from "./services/thirdParty/launchdarkly";
 import { SSOBookmarkPage } from "./views/auth/SSOBookmarkPage";
@@ -46,6 +49,7 @@ const CloudMainView = React.lazy(() => import("packages/cloud/views/layout/Cloud
 const CloudWorkspacesPage = React.lazy(() => import("packages/cloud/views/workspaces"));
 const AuthLayout = React.lazy(() => import("packages/cloud/views/auth"));
 const BillingPage = React.lazy(() => import("packages/cloud/views/billing"));
+const OrganizationUsagePage = React.lazy(() => import("packages/cloud/views/billing/OrganizationUsagePage"));
 const UpcomingFeaturesPage = React.lazy(() => import("packages/cloud/views/UpcomingFeaturesPage"));
 
 const ConnectionsRoutes = React.lazy(() => import("pages/connections/ConnectionsRoutes"));
@@ -70,7 +74,9 @@ const AdvancedSettingsPage = React.lazy(() => import("pages/SettingsPage/pages/A
 const MainRoutes: React.FC = () => {
   const workspace = useCurrentWorkspace();
   const canViewOrgSettings = useIntent("ViewOrganizationSettings", { organizationId: workspace.organizationId });
-  const isBillingInArrearsActive = useExperiment("billing.organizationBillingPage", false);
+  const canManageOrganizationBilling = useGeneratedIntent(Intent.ManageOrganizationBilling);
+  const canViewOrganizationUsage = useGeneratedIntent(Intent.ViewOrganizationUsage);
+  const showBillingPageV2 = useShowBillingPageV2();
 
   useExperimentContext("organization", workspace.organizationId);
 
@@ -102,6 +108,7 @@ const MainRoutes: React.FC = () => {
           <Route index element={<AllSourcesPage />} />
           <Route path={SourcePaths.SelectSourceNew} element={<SelectSourcePage />} />
           <Route path={SourcePaths.SourceNew} element={<CreateSourcePage />} />
+          <Route path={SourcePaths.EnterpriseSource} element={<EnterpriseSourcePage />} />
           <Route path={SourcePaths.Root} element={<SourceItemPage />}>
             <Route index element={<SourceSettingsPage />} />
             <Route path={SourcePaths.Connections} element={<SourceConnectionsPage />} />
@@ -121,19 +128,23 @@ const MainRoutes: React.FC = () => {
           {supportsCloudDbtIntegration && (
             <Route path={CloudSettingsRoutePaths.DbtCloud} element={<DbtCloudSettingsView />} />
           )}
+          {showBillingPageV2 && <Route path={CloudSettingsRoutePaths.Usage} element={<WorkspaceUsagePage />} />}
           {canViewOrgSettings && (
-            <Route path={CloudSettingsRoutePaths.Organization} element={<GeneralOrganizationSettingsPage />} />
-          )}
-          {isBillingInArrearsActive && (
             <>
-              <Route path={CloudSettingsRoutePaths.Billing} element={<OrganizationBillingPage />} />
-              <Route path={CloudSettingsRoutePaths.Usage} element={<WorkspaceUsagePage />} />
+              <Route path={CloudSettingsRoutePaths.Organization} element={<GeneralOrganizationSettingsPage />} />
+              <Route path={CloudSettingsRoutePaths.OrganizationMembers} element={<OrganizationMembersPage />} />
             </>
+          )}
+          {canManageOrganizationBilling && showBillingPageV2 && (
+            <Route path={CloudSettingsRoutePaths.Billing} element={<OrganizationBillingPage />} />
+          )}
+          {canViewOrganizationUsage && showBillingPageV2 && (
+            <Route path={CloudSettingsRoutePaths.OrganizationUsage} element={<OrganizationUsagePage />} />
           )}
           <Route path={CloudSettingsRoutePaths.Advanced} element={<AdvancedSettingsPage />} />
           <Route path="*" element={<Navigate to={CloudSettingsRoutePaths.Account} replace />} />
         </Route>
-        <Route path={CloudRoutes.Billing} element={<BillingPage />} />
+        {!showBillingPageV2 && <Route path={CloudRoutes.Billing} element={<BillingPage />} />}
         <Route path={CloudRoutes.UpcomingFeatures} element={<UpcomingFeaturesPage />} />
         <Route path={`${RoutePaths.ConnectorBuilder}/*`} element={<ConnectorBuilderRoutes />} />
         <Route path="*" element={<Navigate to={RoutePaths.Connections} replace />} />

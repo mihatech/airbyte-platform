@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useIntl } from "react-intl";
+import { FormattedMessage, useIntl } from "react-intl";
 import { useDebounce } from "react-use";
 
 import { Box } from "components/ui/Box";
 import { FlexContainer } from "components/ui/Flex";
 import { ListBox } from "components/ui/ListBox";
+import { Message } from "components/ui/Message";
 import { Switch } from "components/ui/Switch";
 import { Text } from "components/ui/Text";
 
@@ -26,25 +27,39 @@ interface JobLogsModalProps {
   jobId: number;
   initialAttemptId?: number;
   eventId?: string;
-  connectionTimelineEnabled?: boolean;
 }
 
-export const JobLogsModal: React.FC<JobLogsModalProps> = ({
-  jobId,
-  initialAttemptId,
-  eventId,
-  connectionId,
-  connectionTimelineEnabled,
-}) => {
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const [inputValue, setInputValue] = useState("");
+export const JobLogsModal: React.FC<JobLogsModalProps> = ({ jobId, initialAttemptId, eventId, connectionId }) => {
   const job = useJobInfoWithoutLogs(jobId);
+
+  if (job.attempts.length === 0) {
+    trackError(new Error(`No attempts for job`), { jobId, eventId });
+
+    return (
+      <Box p="lg">
+        <Message type="warning" text={<FormattedMessage id="jobHistory.logs.noAttempts" />} />
+      </Box>
+    );
+  }
+
+  return (
+    <JobLogsModalInner
+      jobId={jobId}
+      initialAttemptId={initialAttemptId}
+      eventId={eventId}
+      connectionId={connectionId}
+    />
+  );
+};
+
+const JobLogsModalInner: React.FC<JobLogsModalProps> = ({ jobId, initialAttemptId, eventId, connectionId }) => {
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const job = useJobInfoWithoutLogs(jobId);
+
+  const [inputValue, setInputValue] = useState("");
   const [highlightedMatchIndex, setHighlightedMatchIndex] = useState<number | undefined>(undefined);
   const [matchingLines, setMatchingLines] = useState<number[]>([]);
   const highlightedMatchingLineNumber = highlightedMatchIndex !== undefined ? highlightedMatchIndex + 1 : undefined;
-  if (job.attempts.length === 0) {
-    trackError(new Error(`No attempts for job`), { jobId, eventId });
-  }
 
   const [selectedAttemptId, setSelectedAttemptId] = useState(
     initialAttemptId ?? job.attempts[job.attempts.length - 1].attempt.id
@@ -198,7 +213,7 @@ export const JobLogsModal: React.FC<JobLogsModalProps> = ({
   }, [inputValue]);
 
   return (
-    <FlexContainer direction="column" style={{ height: "100%" }}>
+    <FlexContainer direction="column" style={{ height: "100%" }} data-testid="job-logs-modal">
       <Box p="md" pb="none">
         <FlexContainer alignItems="center">
           <div className={styles.attemptDropdown}>
@@ -223,7 +238,6 @@ export const JobLogsModal: React.FC<JobLogsModalProps> = ({
               jobId={jobId}
               attemptId={selectedAttemptId}
               eventId={eventId}
-              connectionTimelineEnabled={connectionTimelineEnabled}
             />
             <DownloadLogsButton logLines={logLines} fileName={`job-${jobId}-attempt-${selectedAttemptId + 1}`} />
           </FlexContainer>

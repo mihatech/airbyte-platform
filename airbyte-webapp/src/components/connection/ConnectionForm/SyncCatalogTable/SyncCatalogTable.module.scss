@@ -10,28 +10,13 @@ $row-height: 40px;
 .table {
   width: 100%;
   border-spacing: 0;
-  max-width: 100%;
   border-radius: $border-radius;
-
-  tbody {
-    min-height: 100px; // for empty state placeholder
-  }
-}
-
-.thead {
-  position: sticky;
-  top: 0;
-  z-index: z-indices.$tableStickyHeader;
-}
-
-.theadHidden {
-  display: none;
 }
 
 // --------- <th/> ---------
 .th {
   text-align: left;
-  width: auto;
+  height: $row-height;
   padding: 0 variables.$spacing-lg;
   white-space: nowrap;
   background-color: colors.$grey-50;
@@ -55,6 +40,8 @@ $row-height: 40px;
   height: $row-height;
 
   &.emptyPlaceholder {
+    height: $row-height * 2;
+
     &:hover {
       background-color: colors.$foreground;
     }
@@ -86,6 +73,17 @@ $row-height: 40px;
 
   &:last-child > td:last-child {
     border-bottom-right-radius: $border-radius;
+  }
+
+  [data-showonhover="true"] {
+    visibility: hidden;
+  }
+
+  &:hover,
+  &:focus-within {
+    [data-showonhover] {
+      visibility: visible;
+    }
   }
 
   @keyframes highlight {
@@ -125,7 +123,8 @@ $row-height: 40px;
 }
 
 .pkCell,
-.cursorCell {
+.cursorCell,
+.hashCell {
   width: 10%;
 }
 

@@ -1,4 +1,5 @@
 import { Row } from "@tanstack/react-table";
+import isEqual from "lodash/isEqual";
 import React from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 
@@ -21,11 +22,11 @@ import {
   isCursor as checkIsCursor,
   isPrimaryKey as checkIsPrimaryKey,
 } from "../../../syncCatalog/StreamFieldsTable/StreamFieldsTable";
-import { updateFieldSelected } from "../../../syncCatalog/SyncCatalog/streamConfigHelpers";
+import { getSelectedMandatoryFields, updateFieldSelected } from "../../../syncCatalog/SyncCatalog/streamConfigHelpers";
 import { getFieldPathDisplayName } from "../../../syncCatalog/utils";
 import { SyncStreamFieldWithId } from "../../formConfig";
 import { SyncCatalogUIModel } from "../SyncCatalogTable";
-import { checkIsFieldSelected } from "../utils";
+import { checkIsFieldHashed, checkIsFieldSelected } from "../utils";
 
 interface StreamFieldNameCellProps {
   row: Row<SyncCatalogUIModel>;
@@ -38,7 +39,7 @@ export const StreamFieldNameCell: React.FC<StreamFieldNameCellProps> = ({
   updateStreamField,
   globalFilterValue = "",
 }) => {
-  const isColumnSelectionEnabled = useExperiment("connection.columnSelection", true);
+  const isColumnSelectionEnabled = useExperiment("connection.columnSelection");
   const { formatMessage } = useIntl();
   const { mode } = useConnectionFormService();
 
@@ -60,15 +61,14 @@ export const StreamFieldNameCell: React.FC<StreamFieldNameCellProps> = ({
   const isChildFieldCursor = checkIsChildFieldCursor(config, field.path);
   const isPrimaryKey = checkIsPrimaryKey(config, field.path);
   const isChildFieldPrimaryKey = checkIsChildFieldPrimaryKey(config, field.path);
+  const isHashed = checkIsFieldHashed(field, config);
 
   const isDisabled =
-    !config?.selected ||
-    mode === "readonly" ||
-    (config.syncMode === SyncMode.incremental && (isCursor || isChildFieldCursor)) ||
-    (config.destinationSyncMode === DestinationSyncMode.append_dedup && (isPrimaryKey || isChildFieldPrimaryKey)) ||
-    (config.destinationSyncMode === DestinationSyncMode.overwrite_dedup && (isPrimaryKey || isChildFieldPrimaryKey)) ||
-    isNestedField;
-  const showTooltip = isDisabled && mode !== "readonly" && config?.selected;
+    config?.selected &&
+    ((config.syncMode === SyncMode.incremental && (isCursor || isChildFieldCursor)) ||
+      (config.destinationSyncMode === DestinationSyncMode.append_dedup && (isPrimaryKey || isChildFieldPrimaryKey)) ||
+      (config.destinationSyncMode === DestinationSyncMode.overwrite_dedup && (isPrimaryKey || isChildFieldPrimaryKey)));
+  const showTooltip = isDisabled && mode !== "readonly";
 
   const isFieldSelected = checkIsFieldSelected(field, config);
 
@@ -96,9 +96,17 @@ export const StreamFieldNameCell: React.FC<StreamFieldNameCellProps> = ({
       numberOfFieldsInStream,
     });
 
+    const mandatorySelectedFields = getSelectedMandatoryFields(config);
+
     updateStreamField(row.original.streamNode, {
       ...updatedConfig,
-      selectedFields: !updatedConfig?.fieldSelectionEnabled ? [] : updatedConfig?.selectedFields,
+      // any field selection immediately enables the disabled stream
+      ...(isSelected && !config?.selected && { selected: true }),
+      selectedFields: !updatedConfig?.fieldSelectionEnabled
+        ? []
+        : [...(updatedConfig?.selectedFields ?? []), ...mandatorySelectedFields],
+      // remove this field if it was part of hashedFields
+      hashedFields: config.hashedFields?.filter((f) => !isEqual(f.fieldPath, fieldPath)),
     });
   };
 
@@ -110,16 +118,22 @@ export const StreamFieldNameCell: React.FC<StreamFieldNameCellProps> = ({
           <CheckBox
             checkboxSize="sm"
             checked={isFieldSelected}
-            disabled={isDisabled}
+            disabled={isDisabled || mode === "readonly"}
             onChange={() => onToggleFieldSelected(field.path, !isFieldSelected)}
             data-testid="sync-field-checkbox"
           />
         )}
-        {showTooltip && !isNestedField && (
+        {showTooltip && !isNestedField && isColumnSelectionEnabled && (
           <Tooltip
             control={
               <FlexContainer alignItems="center">
-                <CheckBox checkboxSize="sm" disabled checked={isFieldSelected} readOnly />
+                <CheckBox
+                  checkboxSize="sm"
+                  disabled
+                  checked={isFieldSelected}
+                  readOnly
+                  data-testid="sync-field-checkbox"
+                />
               </FlexContainer>
             }
           >
@@ -128,11 +142,20 @@ export const StreamFieldNameCell: React.FC<StreamFieldNameCellProps> = ({
         )}
       </FlexContainer>
       <TextWithOverflowTooltip size="sm">
-        <TextHighlighter searchWords={[globalFilterValue]} textToHighlight={getFieldPathDisplayName(field.path)} />
+        {isHashed ? (
+          <>
+            {getFieldPathDisplayName(field.path)}
+            <Text as="span" bold>
+              _hashed
+            </Text>
+          </>
+        ) : (
+          <TextHighlighter searchWords={[globalFilterValue]} textToHighlight={getFieldPathDisplayName(field.path)} />
+        )}
       </TextWithOverflowTooltip>
-      <Text size="sm" color="grey300">
+      <Text size="sm" color="grey300" bold={isHashed}>
         <FormattedMessage
-          id={`${getDataType(field)}`}
+          id={isHashed ? "airbyte.datatype.string" : `${getDataType(field)}`}
           defaultMessage={formatMessage({ id: "airbyte.datatype.unknown" })}
         />
       </Text>

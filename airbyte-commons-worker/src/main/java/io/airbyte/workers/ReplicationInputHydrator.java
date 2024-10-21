@@ -33,6 +33,7 @@ import io.airbyte.commons.enums.Enums;
 import io.airbyte.commons.helper.DockerImageName;
 import io.airbyte.commons.json.Jsons;
 import io.airbyte.config.ConfiguredAirbyteCatalog;
+import io.airbyte.config.SourceActorConfig;
 import io.airbyte.config.StandardSyncInput;
 import io.airbyte.config.State;
 import io.airbyte.config.StateWrapper;
@@ -41,15 +42,12 @@ import io.airbyte.config.helpers.CatalogTransforms;
 import io.airbyte.config.helpers.StateMessageHelper;
 import io.airbyte.config.secrets.SecretsRepositoryReader;
 import io.airbyte.config.secrets.persistence.RuntimeSecretPersistence;
-import io.airbyte.featureflag.Connection;
 import io.airbyte.featureflag.FeatureFlagClient;
-import io.airbyte.featureflag.Multi;
 import io.airbyte.featureflag.Organization;
-import io.airbyte.featureflag.RefreshConfigBeforeSecretHydrationInitContainer;
 import io.airbyte.featureflag.UseRuntimeSecretPersistence;
-import io.airbyte.featureflag.Workspace;
 import io.airbyte.metrics.lib.ApmTraceUtils;
 import io.airbyte.persistence.job.models.ReplicationInput;
+import io.airbyte.workers.exception.WorkerException;
 import io.airbyte.workers.helper.BackfillHelper;
 import io.airbyte.workers.helper.ResumableFullRefreshStatsHelper;
 import io.airbyte.workers.models.JobInput;
@@ -57,7 +55,6 @@ import io.airbyte.workers.models.RefreshSchemaActivityOutput;
 import io.airbyte.workers.models.ReplicationActivityInput;
 import java.io.IOException;
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -86,11 +83,6 @@ public class ReplicationInputHydrator {
     this.featureFlagClient = featureFlagClient;
   }
 
-  private Boolean shouldRefreshSecretsReferences(final ReplicationActivityInput input) {
-    final Multi context = new Multi(Arrays.asList(new Connection(input.getConnectionId()), new Workspace(input.getWorkspaceId())));
-    return featureFlagClient.boolVariation(RefreshConfigBeforeSecretHydrationInitContainer.INSTANCE, context);
-  }
-
   private <T> T retry(final CheckedSupplier<T> supplier) {
     return Failsafe.with(
         RetryPolicy.builder()
@@ -100,7 +92,7 @@ public class ReplicationInputHydrator {
         .get(supplier);
   }
 
-  private void refreshSecretsReferences(ReplicationActivityInput parsed) {
+  private void refreshSecretsReferences(final ReplicationActivityInput parsed) {
     final Object jobInput = retry(() -> airbyteApiClient.getJobsApi().getJobInput(
         new SyncInput(
             Long.parseLong(parsed.getJobRunConfig().getJobId()),
@@ -134,14 +126,18 @@ public class ReplicationInputHydrator {
    */
   public ReplicationInput getHydratedReplicationInput(final ReplicationActivityInput replicationActivityInput) throws Exception {
     ApmTraceUtils.addTagsToTrace(Map.of("api_base_url", airbyteApiClient.getDestinationApi().getBaseUrl()));
-    if (shouldRefreshSecretsReferences(replicationActivityInput)) {
-      refreshSecretsReferences(replicationActivityInput);
-    }
+    refreshSecretsReferences(replicationActivityInput);
     final var destination =
         airbyteApiClient.getDestinationApi().getDestination(new DestinationIdRequestBody(replicationActivityInput.getDestinationId()));
     final var tag = DockerImageName.INSTANCE.extractTag(replicationActivityInput.getDestinationLauncherConfig().getDockerImage());
     final var resolvedDestinationVersion = airbyteApiClient.getActorDefinitionVersionApi().resolveActorDefinitionVersionByTag(
         new ResolveActorDefinitionVersionRequestBody(destination.getDestinationDefinitionId(), ActorType.DESTINATION, tag));
+
+    final SourceActorConfig sourceActorConfig = Jsons.object(replicationActivityInput.getSourceConfiguration(), SourceActorConfig.class);
+    if (sourceActorConfig.getUseFileTransfer() && !resolvedDestinationVersion.getSupportFileTransfer()) {
+      LOGGER.error("Destination does not support file transfers, but source requires it.");
+      throw new WorkerException("Destination does not support file transfers, but source requires it.");
+    }
 
     // Retrieve the connection, which we need in a few places.
     final long jobId = Long.parseLong(replicationActivityInput.getJobRunConfig().getJobId());
@@ -211,6 +207,7 @@ public class ReplicationInputHydrator {
    * any hydration. Does not copy unhydrated config.
    */
   public ReplicationInput mapActivityInputToReplInput(final ReplicationActivityInput replicationActivityInput) {
+    final SourceActorConfig sourceConfiguration = Jsons.object(replicationActivityInput.getSourceConfiguration(), SourceActorConfig.class);
     return new ReplicationInput()
         .withNamespaceDefinition(replicationActivityInput.getNamespaceDefinition())
         .withNamespaceFormat(replicationActivityInput.getNamespaceFormat())
@@ -223,7 +220,11 @@ public class ReplicationInputHydrator {
         .withIsReset(replicationActivityInput.getIsReset())
         .withJobRunConfig(replicationActivityInput.getJobRunConfig())
         .withSourceLauncherConfig(replicationActivityInput.getSourceLauncherConfig())
-        .withDestinationLauncherConfig(replicationActivityInput.getDestinationLauncherConfig());
+        .withDestinationLauncherConfig(replicationActivityInput.getDestinationLauncherConfig())
+        .withSignalInput(replicationActivityInput.getSignalInput())
+        .withSourceConfiguration(replicationActivityInput.getSourceConfiguration())
+        .withDestinationConfiguration(replicationActivityInput.getDestinationConfiguration())
+        .withUseFileTransfer(sourceConfiguration.getUseFileTransfer());
   }
 
   @VisibleForTesting
@@ -279,7 +280,8 @@ public class ReplicationInputHydrator {
     if (connectionInfo.getSyncCatalog() == null) {
       throw new IllegalArgumentException("Connection is missing catalog, which is required");
     }
-    final ConfiguredAirbyteCatalog catalog = CatalogClientConverters.toConfiguredAirbyteInternal(connectionInfo.getSyncCatalog());
+    final ConfiguredAirbyteCatalog catalog =
+        CatalogClientConverters.toConfiguredAirbyteInternal(connectionInfo.getSyncCatalog());
     return catalog;
   }
 

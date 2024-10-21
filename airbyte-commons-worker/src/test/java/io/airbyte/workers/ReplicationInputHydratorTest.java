@@ -5,6 +5,7 @@
 package io.airbyte.workers;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -49,6 +50,7 @@ import io.airbyte.api.client.model.generated.SyncMode;
 import io.airbyte.commons.json.Jsons;
 import io.airbyte.config.ConnectionContext;
 import io.airbyte.config.JobSyncConfig;
+import io.airbyte.config.SourceActorConfig;
 import io.airbyte.config.State;
 import io.airbyte.config.SyncResourceRequirements;
 import io.airbyte.config.helpers.StateMessageHelper;
@@ -57,12 +59,15 @@ import io.airbyte.featureflag.FeatureFlagClient;
 import io.airbyte.featureflag.TestClient;
 import io.airbyte.persistence.job.models.IntegrationLauncherConfig;
 import io.airbyte.persistence.job.models.JobRunConfig;
+import io.airbyte.persistence.job.models.ReplicationInput;
+import io.airbyte.workers.exception.WorkerException;
 import io.airbyte.workers.helper.CatalogDiffConverter;
 import io.airbyte.workers.helper.ResumableFullRefreshStatsHelper;
 import io.airbyte.workers.models.RefreshSchemaActivityOutput;
 import io.airbyte.workers.models.ReplicationActivityInput;
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.assertj.core.api.CollectionAssert;
 import org.junit.jupiter.api.BeforeEach;
@@ -100,6 +105,8 @@ class ReplicationInputHydratorTest {
           new AirbyteStreamConfiguration(
               SyncMode.INCREMENTAL,
               DestinationSyncMode.APPEND,
+              null,
+              null,
               null,
               null,
               null,
@@ -236,8 +243,7 @@ class ReplicationInputHydratorTest {
         "unused",
         null, // unused
         new ConnectionContext().withOrganizationId(UUID.randomUUID()),
-        false,
-        false);
+        null);
   }
 
   @ParameterizedTest
@@ -310,6 +316,18 @@ class ReplicationInputHydratorTest {
   }
 
   @Test
+  void testGenerateReplicationFailsIfNonCompatibleFileTransfer() throws Exception {
+    mockNonRefresh();
+
+    // Verify that we get the state and catalog from the API.
+    final ReplicationInputHydrator replicationInputHydrator = getReplicationInputHydrator();
+
+    final var replicationActivityInput = getDefaultReplicationActivityInputForTest();
+    replicationActivityInput.setSourceConfiguration(Jsons.jsonNode(new SourceActorConfig().withUseFileTransfer(true)));
+    assertThrows(WorkerException.class, () -> replicationInputHydrator.getHydratedReplicationInput(replicationActivityInput));
+  }
+
+  @Test
   void testTrackBackfillAndResume() throws IOException {
     final ReplicationInputHydrator replicationInputHydrator = getReplicationInputHydrator();
     final io.airbyte.config.StreamDescriptor stream1 = new io.airbyte.config.StreamDescriptor().withName("s1").withNamespace("ns1");
@@ -331,7 +349,7 @@ class ReplicationInputHydratorTest {
             new StreamAttemptMetadata("s1", true, false, "ns2"),
             new StreamAttemptMetadata("s2", true, true, null)));
 
-    ArgumentCaptor<SaveStreamAttemptMetadataRequestBody> captor = ArgumentCaptor.forClass(SaveStreamAttemptMetadataRequestBody.class);
+    final ArgumentCaptor<SaveStreamAttemptMetadataRequestBody> captor = ArgumentCaptor.forClass(SaveStreamAttemptMetadataRequestBody.class);
     verify(attemptApi).saveStreamMetadata(captor.capture());
     assertEquals(expectedRequest.getJobId(), captor.getValue().getJobId());
     assertEquals(expectedRequest.getAttemptNumber(), captor.getValue().getAttemptNumber());
@@ -359,7 +377,7 @@ class ReplicationInputHydratorTest {
             new StreamAttemptMetadata("s1", false, true, null),
             new StreamAttemptMetadata("s2", false, true, null)));
 
-    ArgumentCaptor<SaveStreamAttemptMetadataRequestBody> captor = ArgumentCaptor.forClass(SaveStreamAttemptMetadataRequestBody.class);
+    final ArgumentCaptor<SaveStreamAttemptMetadataRequestBody> captor = ArgumentCaptor.forClass(SaveStreamAttemptMetadataRequestBody.class);
     verify(attemptApi).saveStreamMetadata(captor.capture());
     assertEquals(expectedRequest.getJobId(), captor.getValue().getJobId());
     assertEquals(expectedRequest.getAttemptNumber(), captor.getValue().getAttemptNumber());
@@ -387,12 +405,28 @@ class ReplicationInputHydratorTest {
             new StreamAttemptMetadata("s1", true, false, "ns2"),
             new StreamAttemptMetadata("s2", true, false, null)));
 
-    ArgumentCaptor<SaveStreamAttemptMetadataRequestBody> captor = ArgumentCaptor.forClass(SaveStreamAttemptMetadataRequestBody.class);
+    final ArgumentCaptor<SaveStreamAttemptMetadataRequestBody> captor = ArgumentCaptor.forClass(SaveStreamAttemptMetadataRequestBody.class);
     verify(attemptApi).saveStreamMetadata(captor.capture());
     assertEquals(expectedRequest.getJobId(), captor.getValue().getJobId());
     assertEquals(expectedRequest.getAttemptNumber(), captor.getValue().getAttemptNumber());
     CollectionAssert.assertThatCollection(captor.getValue().getStreamMetadata())
         .containsExactlyInAnyOrderElementsOf(expectedRequest.getStreamMetadata());
+  }
+
+  @Test
+  void testMapActivityInputToReplInput() {
+    ReplicationActivityInput replicationActivityInput = getDefaultReplicationActivityInputForTest();
+    final JsonNode sourceConfig = Jsons.jsonNode(Map.of("source", "configuration"));
+    replicationActivityInput.setSourceConfiguration(sourceConfig);
+    final JsonNode destinationConfig = Jsons.jsonNode(Map.of("destination", "configuration"));
+    replicationActivityInput.setDestinationConfiguration(destinationConfig);
+
+    ReplicationInputHydrator replicationInputHydrator = getReplicationInputHydrator();
+
+    ReplicationInput replicationInput = replicationInputHydrator.mapActivityInputToReplInput(replicationActivityInput);
+
+    assertEquals(sourceConfig, replicationInput.getSourceConfiguration());
+    assertEquals(destinationConfig, replicationInput.getDestinationConfiguration());
   }
 
   private void mockEnableBackfillForConnection(final boolean withRefresh) throws IOException {
@@ -416,7 +450,8 @@ class ReplicationInputHydratorTest {
         UUID.randomUUID(),
         "dockerRepo",
         "dockerTag",
-        true));
+        true,
+        false));
   }
 
   private void mockNonRefresh() throws IOException {
@@ -428,6 +463,7 @@ class ReplicationInputHydratorTest {
         UUID.randomUUID(),
         "dockerRepo",
         "dockerTag",
+        false,
         false));
   }
 

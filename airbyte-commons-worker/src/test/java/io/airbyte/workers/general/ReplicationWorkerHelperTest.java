@@ -8,7 +8,6 @@ import static io.airbyte.workers.test_utils.TestConfigHelpers.DESTINATION_IMAGE;
 import static io.airbyte.workers.test_utils.TestConfigHelpers.SOURCE_IMAGE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -18,7 +17,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.airbyte.api.client.AirbyteApiClient;
 import io.airbyte.api.client.generated.ActorDefinitionVersionApi;
 import io.airbyte.api.client.generated.DestinationApi;
@@ -33,12 +31,11 @@ import io.airbyte.config.ConfiguredMapper;
 import io.airbyte.config.State;
 import io.airbyte.config.StreamDescriptor;
 import io.airbyte.config.WorkerDestinationConfig;
-import io.airbyte.featureflag.Connection;
-import io.airbyte.featureflag.EnableMappers;
+import io.airbyte.config.adapters.AirbyteJsonRecordAdapter;
 import io.airbyte.featureflag.FeatureFlagClient;
 import io.airbyte.featureflag.TestClient;
 import io.airbyte.mappers.application.RecordMapper;
-import io.airbyte.mappers.transformations.Record;
+import io.airbyte.mappers.transformations.DestinationCatalogGenerator;
 import io.airbyte.persistence.job.models.ReplicationInput;
 import io.airbyte.protocol.models.AirbyteAnalyticsTraceMessage;
 import io.airbyte.protocol.models.AirbyteLogMessage;
@@ -94,6 +91,7 @@ class ReplicationWorkerHelperTest {
   private ReplicationAirbyteMessageEventPublishingHelper replicationAirbyteMessageEventPublishingHelper;
   private RecordMapper recordMapper;
   private FeatureFlagClient featureFlagClient;
+  private DestinationCatalogGenerator destinationCatalogGenerator;
 
   private final ReplicationContext replicationContext = new ReplicationContext(true, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), 0L,
       1, UUID.randomUUID(), SOURCE_IMAGE, DESTINATION_IMAGE, UUID.randomUUID(), UUID.randomUUID());
@@ -120,7 +118,7 @@ class ReplicationWorkerHelperTest {
     when(streamStatusTrackerFactory.create(any())).thenReturn(streamStatusTracker);
     recordMapper = mock(RecordMapper.class);
     featureFlagClient = mock(TestClient.class);
-    when(featureFlagClient.boolVariation(eq(EnableMappers.INSTANCE), any())).thenReturn(false);
+    destinationCatalogGenerator = mock(DestinationCatalogGenerator.class);
     replicationWorkerHelper = spy(new ReplicationWorkerHelper(
         mock(FieldSelector.class),
         mapper,
@@ -130,14 +128,14 @@ class ReplicationWorkerHelperTest {
         mock(ThreadedTimeTracker.class),
         mock(VoidCallable.class),
         workloadApiClient,
-        false,
         analyticsMessageTracker,
-        Optional.empty(),
+        "workload-id",
         airbyteApiClient,
         streamStatusCompletionTracker,
         streamStatusTrackerFactory,
         recordMapper,
-        featureFlagClient));
+        featureFlagClient,
+        destinationCatalogGenerator));
   }
 
   @AfterEach
@@ -151,6 +149,8 @@ class ReplicationWorkerHelperTest {
     mockSupportRefreshes(supportRefreshes);
     // Need to pass in a replication context
     final ConfiguredAirbyteCatalog catalog = buildConfiguredAirbyteCatalog();
+    when(destinationCatalogGenerator.generateDestinationCatalog(any()))
+        .thenReturn(new DestinationCatalogGenerator.CatalogGenerationResult(catalog, Map.of()));
     replicationWorkerHelper.initialize(
         replicationContext,
         mock(ReplicationFeatureFlags.class),
@@ -178,11 +178,14 @@ class ReplicationWorkerHelperTest {
   void testAnalyticsMessageHandling() throws IOException {
     mockSupportRefreshes(false);
     // Need to pass in a replication context
+    final ConfiguredAirbyteCatalog catalog = mock(ConfiguredAirbyteCatalog.class);
+    when(destinationCatalogGenerator.generateDestinationCatalog(any()))
+        .thenReturn(new DestinationCatalogGenerator.CatalogGenerationResult(catalog, Map.of()));
     replicationWorkerHelper.initialize(
         replicationContext,
         mock(ReplicationFeatureFlags.class),
         mock(Path.class),
-        mock(ConfiguredAirbyteCatalog.class),
+        catalog,
         mock(State.class));
     // Need to have a configured catalog for getReplicationOutput
     replicationWorkerHelper.startDestination(
@@ -243,12 +246,15 @@ class ReplicationWorkerHelperTest {
   @Test
   void callsStreamStatusTrackerOnSourceMessage() throws IOException {
     mockSupportRefreshes(true);
+    final ConfiguredAirbyteCatalog catalog = mock(ConfiguredAirbyteCatalog.class);
+    when(destinationCatalogGenerator.generateDestinationCatalog(any()))
+        .thenReturn(new DestinationCatalogGenerator.CatalogGenerationResult(catalog, Map.of()));
 
     replicationWorkerHelper.initialize(
         replicationContext,
         mock(ReplicationFeatureFlags.class),
         mock(Path.class),
-        mock(ConfiguredAirbyteCatalog.class),
+        catalog,
         mock(State.class));
 
     final AirbyteMessage message = mock(AirbyteMessage.class);
@@ -261,12 +267,14 @@ class ReplicationWorkerHelperTest {
   @Test
   void callsStreamStatusTrackerOnDestinationMessage() throws IOException {
     mockSupportRefreshes(true);
-
+    final ConfiguredAirbyteCatalog catalog = mock(ConfiguredAirbyteCatalog.class);
+    when(destinationCatalogGenerator.generateDestinationCatalog(any()))
+        .thenReturn(new DestinationCatalogGenerator.CatalogGenerationResult(catalog, Map.of()));
     replicationWorkerHelper.initialize(
         replicationContext,
         mock(ReplicationFeatureFlags.class),
         mock(Path.class),
-        mock(ConfiguredAirbyteCatalog.class),
+        catalog,
         mock(State.class));
 
     final AirbyteMessage message = mock(AirbyteMessage.class);
@@ -283,6 +291,8 @@ class ReplicationWorkerHelperTest {
     mockSupportRefreshes(supportRefreshes);
     // Need to pass in a replication context
     final ConfiguredAirbyteCatalog catalog = buildConfiguredAirbyteCatalog();
+    when(destinationCatalogGenerator.generateDestinationCatalog(any()))
+        .thenReturn(new DestinationCatalogGenerator.CatalogGenerationResult(catalog, Map.of()));
     replicationWorkerHelper.initialize(
         replicationContext,
         mock(ReplicationFeatureFlags.class),
@@ -300,24 +310,25 @@ class ReplicationWorkerHelperTest {
     assertEquals(supportRefreshes, configCaptor.getValue().getSupportRefreshes());
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  void testApplyTransformationFlagDisableOrNoMapper(final boolean mappersEnabled) throws IOException {
+  @Test
+  void testApplyTransformationNoMapper() throws IOException {
     mockSupportRefreshes(false);
+    ConfiguredAirbyteCatalog catalog = mock(ConfiguredAirbyteCatalog.class);
+    when(destinationCatalogGenerator.generateDestinationCatalog(any()))
+        .thenReturn(new DestinationCatalogGenerator.CatalogGenerationResult(catalog, Map.of()));
     // Need to pass in a replication context
     replicationWorkerHelper.initialize(
         replicationContext,
         mock(ReplicationFeatureFlags.class),
         mock(Path.class),
-        mock(ConfiguredAirbyteCatalog.class),
+        catalog,
         mock(State.class));
 
-    final AirbyteRecordMessage recordMessage = new AirbyteRecordMessage().withStream("stream").withData(Jsons.jsonNode(Map.of("column", "value")));
-    final AirbyteRecordMessage copiedRecordMessage = Jsons.clone(recordMessage);
+    final AirbyteMessage recordMessage = new AirbyteMessage().withType(Type.RECORD)
+        .withRecord(new AirbyteRecordMessage().withStream("stream").withData(Jsons.jsonNode(Map.of("column", "value"))));
+    final AirbyteMessage copiedRecordMessage = Jsons.clone(recordMessage);
 
-    when(featureFlagClient.boolVariation(EnableMappers.INSTANCE, new Connection(replicationContext.getConnectionId()))).thenReturn(mappersEnabled);
-
-    replicationWorkerHelper.applyTransformationMappers(recordMessage);
+    replicationWorkerHelper.applyTransformationMappers(new AirbyteJsonRecordAdapter(recordMessage));
 
     assertEquals(copiedRecordMessage, recordMessage);
     verifyNoInteractions(recordMapper);
@@ -334,8 +345,8 @@ class ReplicationWorkerHelperTest {
     when(stream.getStreamDescriptor()).thenReturn(new StreamDescriptor().withName("stream"));
     when(stream.getMappers()).thenReturn(mappers);
     when(catalog.getStreams()).thenReturn(List.of(stream));
-    when(featureFlagClient.boolVariation(EnableMappers.INSTANCE, new Connection(replicationContext.getConnectionId()))).thenReturn(true);
-
+    when(destinationCatalogGenerator.generateDestinationCatalog(any()))
+        .thenReturn(new DestinationCatalogGenerator.CatalogGenerationResult(catalog, Map.of()));
     // Need to pass in a replication context
     replicationWorkerHelper.initialize(
         replicationContext,
@@ -344,14 +355,14 @@ class ReplicationWorkerHelperTest {
         catalog,
         mock(State.class));
 
-    final AirbyteRecordMessage recordMessage =
-        new AirbyteRecordMessage().withStream("stream").withData(Jsons.jsonNode(Map.of("column", "value")));
+    final AirbyteMessage recordMessage =
+        new AirbyteMessage().withType(Type.RECORD)
+            .withRecord(new AirbyteRecordMessage().withStream("stream").withData(Jsons.jsonNode(Map.of("column", "value"))));
+    final AirbyteJsonRecordAdapter recordAdapter = new AirbyteJsonRecordAdapter(recordMessage);
 
-    Record record = new Record((ObjectNode) recordMessage.getData());
+    replicationWorkerHelper.applyTransformationMappers(recordAdapter);
 
-    replicationWorkerHelper.applyTransformationMappers(recordMessage);
-
-    verify(recordMapper).applyMappers(record, mappers);
+    verify(recordMapper).applyMappers(recordAdapter, mappers);
   }
 
   private void mockSupportRefreshes(final boolean supportsRefreshes) throws IOException {
@@ -360,7 +371,8 @@ class ReplicationWorkerHelperTest {
             UUID.randomUUID(),
             "dockerRepository",
             "dockerImageTag",
-            supportsRefreshes));
+            supportsRefreshes,
+            false));
   }
 
   private ConfiguredAirbyteCatalog buildConfiguredAirbyteCatalog() {
